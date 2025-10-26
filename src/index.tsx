@@ -33,7 +33,7 @@ app.get('/dashboard', (c) => {
 app.get('/api/auth/oauth/google', (c) => {
   // In production, redirect to Google OAuth
   // For now, show message
-  return c.html(\`
+  return c.html(`
     <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
       <h1 style="font-size: 32px; margin-bottom: 16px;">🔵 Google OAuth</h1>
       <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
@@ -44,12 +44,12 @@ app.get('/api/auth/oauth/google', (c) => {
         Back to Home
       </a>
     </div>
-  \`)
+  `)
 })
 
 // Microsoft OAuth
 app.get('/api/auth/oauth/microsoft', (c) => {
-  return c.html(\`
+  return c.html(`
     <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
       <h1 style="font-size: 32px; margin-bottom: 16px;">🔷 Microsoft OAuth</h1>
       <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
@@ -60,12 +60,12 @@ app.get('/api/auth/oauth/microsoft', (c) => {
         Back to Home
       </a>
     </div>
-  \`)
+  `)
 })
 
 // Apple OAuth
 app.get('/api/auth/oauth/apple', (c) => {
-  return c.html(\`
+  return c.html(`
     <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
       <h1 style="font-size: 32px; margin-bottom: 16px;">🍎 Apple OAuth</h1>
       <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
@@ -76,7 +76,7 @@ app.get('/api/auth/oauth/apple', (c) => {
         Back to Home
       </a>
     </div>
-  \`)
+  `)
 })
 
 // ==================== AUTHENTICATION ROUTES ====================
@@ -975,10 +975,4 @@ app.patch('/api/admin/content/:id', async (c) => {
 
 // Old homepage removed - now using pages/home.tsx
 
-// Export app
-        <script src="https://cdn.tailwindcss.com"></script>
-        <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
-        <style>
-          .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-          .card-hover:hover { transform: translateY(-4px); transition: all 0.3s; }
-        </style>
+export default app

@@ -468,7 +468,7 @@ export const DashboardPage = () => `
             window.location.href = '/';
         }
 
-        axios.defaults.headers.common['Authorization'] = \`Bearer \${authToken}\`;
+        axios.defaults.headers.common['Authorization'] = 'Bearer ' + authToken;
 
         // Load Dashboard Data
         async function loadDashboard() {
@@ -479,8 +479,8 @@ export const DashboardPage = () => `
                 currentUser = data.user;
                 document.getElementById('userName').textContent = currentUser.name;
                 document.getElementById('welcomeName').textContent = currentUser.name.split(' ')[0];
-                document.getElementById('creditDisplay').textContent = \`\${currentUser.credit_balance} credits\`;
-                document.getElementById('userAvatar').src = currentUser.avatar_url || \`https://ui-avatars.com/api/?name=\${encodeURIComponent(currentUser.name)}\`;
+                document.getElementById('creditDisplay').textContent = currentUser.credit_balance + ' credits';
+                document.getElementById('userAvatar').src = currentUser.avatar_url || 'https://ui-avatars.com/api/?name=' + encodeURIComponent(currentUser.name);
 
                 // Stats
                 document.getElementById('totalSessions').textContent = data.stats.total_sessions || 0;
@@ -505,27 +505,25 @@ export const DashboardPage = () => `
         function renderUpcomingSessions(sessions) {
             const container = document.getElementById('upcomingSessions');
             if (!sessions || sessions.length === 0) {
-                container.innerHTML = \`
-                    <div class="empty-state">
-                        <div class="empty-state-icon">📅</div>
-                        <p>No upcoming sessions. Ready to book your first one?</p>
-                        <button onclick="exploreSkills()" class="btn-primary" style="margin-top: 16px;">Explore Skills</button>
-                    </div>
-                \`;
+                container.innerHTML = '<div class="empty-state">' +
+                    '<div class="empty-state-icon">📅</div>' +
+                    '<p>No upcoming sessions. Ready to book your first one?</p>' +
+                    '<button onclick="exploreSkills()" class="btn-primary" style="margin-top: 16px;">Explore Skills</button>' +
+                    '</div>';
                 return;
             }
 
-            container.innerHTML = sessions.map(session => \`
-                <div class="session-card">
-                    <div class="session-info">
-                        <h4>\${session.title}</h4>
-                        <div class="session-meta">
-                            \${session.other_user_name} • \${new Date(session.scheduled_date).toLocaleString()}
-                        </div>
-                    </div>
-                    <span class="status-badge status-\${session.status}">\${session.status}</span>
-                </div>
-            \`).join('');
+            container.innerHTML = sessions.map(function(session) {
+                return '<div class="session-card">' +
+                    '<div class="session-info">' +
+                    '<h4>' + session.title + '</h4>' +
+                    '<div class="session-meta">' +
+                    session.other_user_name + ' • ' + new Date(session.scheduled_date).toLocaleString() +
+                    '</div>' +
+                    '</div>' +
+                    '<span class="status-badge status-' + session.status + '">' + session.status + '</span>' +
+                    '</div>';
+            }).join('');
         }
 
         async function loadSkills() {
@@ -534,13 +532,13 @@ export const DashboardPage = () => `
                 const skills = response.data.data;
                 const container = document.getElementById('skillsGrid');
 
-                container.innerHTML = skills.slice(0, 8).map(skill => \`
-                    <div class="skill-card" onclick="exploreSkill(\${skill.id})">
-                        <div class="skill-icon">\${skill.icon || '📚'}</div>
-                        <div class="skill-name">\${skill.name}</div>
-                        <div class="skill-category">\${skill.category}</div>
-                    </div>
-                \`).join('');
+                container.innerHTML = skills.slice(0, 8).map(function(skill) {
+                    return '<div class="skill-card" onclick="exploreSkill(' + skill.id + ')">' +
+                        '<div class="skill-icon">' + (skill.icon || '📚') + '</div>' +
+                        '<div class="skill-name">' + skill.name + '</div>' +
+                        '<div class="skill-category">' + skill.category + '</div>' +
+                        '</div>';
+                }).join('');
             } catch (error) {
                 console.error('Skills load error:', error);
             }
@@ -562,9 +560,9 @@ export const DashboardPage = () => `
                 });
 
                 if (response.data.success) {
-                    alert(\`Successfully purchased \${amount} credits!\`);
+                    alert('Successfully purchased ' + amount + ' credits!');
                     currentUser.credit_balance = response.data.data.new_balance;
-                    document.getElementById('creditDisplay').textContent = \`\${currentUser.credit_balance} credits\`;
+                    document.getElementById('creditDisplay').textContent = currentUser.credit_balance + ' credits';
                     closeModal();
                 }
             } catch (error) {
@@ -577,7 +575,7 @@ export const DashboardPage = () => `
         }
 
         function exploreSkill(skillId) {
-            alert(\`Viewing skill \${skillId} - Find teachers and book sessions`);
+            alert('Viewing skill ' + skillId + ' - Find teachers and book sessions');
         }
 
         function handleLogout() {
