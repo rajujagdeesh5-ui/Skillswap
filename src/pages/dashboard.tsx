@@ -16,8 +16,8 @@ export const DashboardPage = () => `
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #f5f5f7;
-            color: #1d1d1f;
+            background: #F5F5F7;
+            color: #000000;
             -webkit-font-smoothing: antialiased;
         }
 
@@ -43,7 +43,7 @@ export const DashboardPage = () => `
         .logo {
             font-size: 22px;
             font-weight: 600;
-            color: #1d1d1f;
+            color: #000000;
         }
 
         .topbar-right {
@@ -53,7 +53,7 @@ export const DashboardPage = () => `
         }
 
         .credit-badge {
-            background: linear-gradient(135deg, #0071e3, #00c3ff);
+            background: linear-gradient(135deg, #0070C9, #00c3ff);
             color: white;
             padding: 8px 20px;
             border-radius: 980px;
@@ -62,7 +62,7 @@ export const DashboardPage = () => `
         }
 
         .btn-credit {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
             padding: 8px 18px;
             border-radius: 980px;
@@ -139,7 +139,7 @@ export const DashboardPage = () => `
         .stat-value {
             font-size: 36px;
             font-weight: 700;
-            color: #0071e3;
+            color: #0070C9;
         }
 
         .section {
@@ -163,7 +163,7 @@ export const DashboardPage = () => `
         }
 
         .btn-link {
-            color: #0071e3;
+            color: #0070C9;
             text-decoration: none;
             font-size: 15px;
             font-weight: 500;
@@ -176,7 +176,7 @@ export const DashboardPage = () => `
         }
 
         .skill-card {
-            background: #f5f5f7;
+            background: #F5F5F7;
             border-radius: 12px;
             padding: 20px;
             text-align: center;
@@ -206,7 +206,7 @@ export const DashboardPage = () => `
         }
 
         .session-card {
-            background: #f5f5f7;
+            background: #F5F5F7;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 12px;
@@ -256,7 +256,7 @@ export const DashboardPage = () => `
         }
 
         .btn-primary {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
             padding: 12px 24px;
             border-radius: 980px;
@@ -313,7 +313,7 @@ export const DashboardPage = () => `
         }
 
         .credit-option {
-            background: #f5f5f7;
+            background: #F5F5F7;
             border-radius: 12px;
             padding: 20px;
             margin-bottom: 12px;
@@ -326,7 +326,7 @@ export const DashboardPage = () => `
         }
 
         .credit-option:hover {
-            border-color: #0071e3;
+            border-color: #0070C9;
         }
 
         .credit-amount {
@@ -337,7 +337,7 @@ export const DashboardPage = () => `
         .credit-price {
             font-size: 24px;
             font-weight: 700;
-            color: #0071e3;
+            color: #0070C9;
         }
 
         @media (max-width: 768px) {

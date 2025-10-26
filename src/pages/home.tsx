@@ -16,8 +16,8 @@ export const HomePage = () => `
 
         body {
             font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            background: #fff;
-            color: #1d1d1f;
+            background: #FFFFFF;
+            color: #000000;
             -webkit-font-smoothing: antialiased;
             line-height: 1.6;
         }
@@ -27,7 +27,7 @@ export const HomePage = () => `
             position: fixed;
             top: 0;
             width: 100%;
-            background: rgba(255, 255, 255, 0.8);
+            background: rgba(245, 245, 247, 0.8);
             backdrop-filter: saturate(180%) blur(20px);
             border-bottom: 1px solid rgba(0, 0, 0, 0.1);
             z-index: 1000;
@@ -45,7 +45,7 @@ export const HomePage = () => `
         .logo {
             font-size: 24px;
             font-weight: 600;
-            color: #1d1d1f;
+            color: #000000;
             text-decoration: none;
             letter-spacing: -0.5px;
         }
@@ -57,7 +57,7 @@ export const HomePage = () => `
         }
 
         .nav-link {
-            color: #1d1d1f;
+            color: #000000;
             text-decoration: none;
             font-size: 14px;
             font-weight: 400;
@@ -69,7 +69,7 @@ export const HomePage = () => `
         }
 
         .btn-primary {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
             padding: 8px 18px;
             border-radius: 980px;
@@ -81,15 +81,15 @@ export const HomePage = () => `
         }
 
         .btn-primary:hover {
-            background: #0077ed;
+            background: #0077ED;
         }
 
         .btn-secondary {
             background: transparent;
-            color: #0071e3;
+            color: #0070C9;
             padding: 8px 18px;
             border-radius: 980px;
-            border: 1px solid #0071e3;
+            border: 1px solid #0070C9;
             font-size: 14px;
             font-weight: 500;
             cursor: pointer;
@@ -97,7 +97,7 @@ export const HomePage = () => `
         }
 
         .btn-secondary:hover {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
         }
 
@@ -115,7 +115,7 @@ export const HomePage = () => `
             line-height: 1.1;
             letter-spacing: -1.5px;
             margin-bottom: 16px;
-            background: linear-gradient(135deg, #0071e3 0%, #00c3ff 100%);
+            background: linear-gradient(135deg, #0070C9 0%, #00c3ff 100%);
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
             background-clip: text;
@@ -147,7 +147,7 @@ export const HomePage = () => `
         }
 
         .btn-blue {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
         }
 
@@ -158,18 +158,18 @@ export const HomePage = () => `
 
         .btn-outline {
             background: transparent;
-            color: #0071e3;
-            border: 2px solid #0071e3;
+            color: #0070C9;
+            border: 2px solid #0070C9;
         }
 
         .btn-outline:hover {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
         }
 
         /* Features Section */
         .features {
-            background: #f5f5f7;
+            background: #F5F5F7;
             padding: 80px 20px;
         }
 
@@ -248,18 +248,18 @@ export const HomePage = () => `
         }
 
         .pricing-card:hover {
-            border-color: #0071e3;
+            border-color: #0070C9;
             box-shadow: 0 20px 40px rgba(0, 113, 227, 0.1);
         }
 
         .pricing-card.featured {
-            border-color: #0071e3;
+            border-color: #0070C9;
             position: relative;
             transform: scale(1.05);
         }
 
         .pricing-badge {
-            background: #0071e3;
+            background: #0070C9;
             color: white;
             padding: 6px 16px;
             border-radius: 12px;
@@ -278,7 +278,7 @@ export const HomePage = () => `
         .pricing-price {
             font-size: 48px;
             font-weight: 700;
-            color: #0071e3;
+            color: #0070C9;
             margin-bottom: 8px;
         }
 
@@ -295,9 +295,9 @@ export const HomePage = () => `
 
         .pricing-feature {
             padding: 12px 0;
-            border-bottom: 1px solid #f5f5f7;
+            border-bottom: 1px solid #F5F5F7;
             font-size: 15px;
-            color: #1d1d1f;
+            color: #000000;
         }
 
         .pricing-feature:last-child {
@@ -305,7 +305,7 @@ export const HomePage = () => `
         }
 
         .check-icon {
-            color: #0071e3;
+            color: #0070C9;
             margin-right: 8px;
         }
 
@@ -362,7 +362,7 @@ export const HomePage = () => `
             font-size: 14px;
             font-weight: 500;
             margin-bottom: 8px;
-            color: #1d1d1f;
+            color: #000000;
         }
 
         .form-input {
@@ -377,7 +377,7 @@ export const HomePage = () => `
 
         .form-input:focus {
             outline: none;
-            border-color: #0071e3;
+            border-color: #0070C9;
         }
 
         .form-select {
@@ -412,7 +412,7 @@ export const HomePage = () => `
         }
 
         .oauth-btn:hover {
-            background: #f5f5f7;
+            background: #F5F5F7;
         }
 
         .divider {
@@ -448,7 +448,7 @@ export const HomePage = () => `
         }
 
         .modal-link {
-            color: #0071e3;
+            color: #0070C9;
             text-decoration: none;
             font-weight: 500;
         }
@@ -476,7 +476,7 @@ export const HomePage = () => `
         }
 
         .close-modal:hover {
-            background: #f5f5f7;
+            background: #F5F5F7;
         }
 
         @media (max-width: 768px) {
