@@ -4,6 +4,8 @@ import { serveStatic } from 'hono/cloudflare-workers'
 import type { Bindings, ApiResponse, User, Session, Skill, LearningContent, UserWithStats } from './types'
 import { hashPassword, verifyPassword, createAuthToken, getUserFromAuth, isValidEmail } from './utils/auth'
 import { query, queryOne, execute, paginate, buildSearchQuery, getIntParam, formatDate } from './utils/db'
+import { HomePage } from './pages/home'
+import { DashboardPage } from './pages/dashboard'
 
 const app = new Hono<{ Bindings: Bindings }>()
 
@@ -12,6 +14,70 @@ app.use('/api/*', cors())
 
 // Serve static files
 app.use('/static/*', serveStatic({ root: './public' }))
+
+// ==================== PAGE ROUTES ====================
+
+// Home page
+app.get('/', (c) => {
+  return c.html(HomePage())
+})
+
+// Dashboard page
+app.get('/dashboard', (c) => {
+  return c.html(DashboardPage())
+})
+
+// ==================== OAUTH ROUTES (Placeholders) ====================
+
+// Google OAuth
+app.get('/api/auth/oauth/google', (c) => {
+  // In production, redirect to Google OAuth
+  // For now, show message
+  return c.html(\`
+    <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
+      <h1 style="font-size: 32px; margin-bottom: 16px;">🔵 Google OAuth</h1>
+      <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
+        Google OAuth integration will be configured here.<br>
+        You'll need to set up Google Cloud Console OAuth credentials.
+      </p>
+      <a href="/" style="background: #0071e3; color: white; padding: 12px 24px; border-radius: 980px; text-decoration: none; font-size: 15px;">
+        Back to Home
+      </a>
+    </div>
+  \`)
+})
+
+// Microsoft OAuth
+app.get('/api/auth/oauth/microsoft', (c) => {
+  return c.html(\`
+    <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
+      <h1 style="font-size: 32px; margin-bottom: 16px;">🔷 Microsoft OAuth</h1>
+      <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
+        Microsoft OAuth integration will be configured here.<br>
+        You'll need to set up Azure AD application credentials.
+      </p>
+      <a href="/" style="background: #0071e3; color: white; padding: 12px 24px; border-radius: 980px; text-decoration: none; font-size: 15px;">
+        Back to Home
+      </a>
+    </div>
+  \`)
+})
+
+// Apple OAuth
+app.get('/api/auth/oauth/apple', (c) => {
+  return c.html(\`
+    <div style="font-family: Inter, sans-serif; text-align: center; padding: 100px 20px;">
+      <h1 style="font-size: 32px; margin-bottom: 16px;">🍎 Apple OAuth</h1>
+      <p style="font-size: 18px; color: #6e6e73; margin-bottom: 32px;">
+        Apple Sign In integration will be configured here.<br>
+        You'll need to set up Apple Developer account credentials.
+      </p>
+      <a href="/" style="background: #0071e3; color: white; padding: 12px 24px; border-radius: 980px; text-decoration: none; font-size: 15px;">
+        Back to Home
+      </a>
+    </div>
+  \`)
+})
 
 // ==================== AUTHENTICATION ROUTES ====================
 
@@ -907,336 +973,12 @@ app.patch('/api/admin/content/:id', async (c) => {
   return c.json<ApiResponse>({ success: true, message: is_approved ? 'Content approved' : 'Content rejected' })
 })
 
-// ==================== HOME PAGE ====================
+// Old homepage removed - now using pages/home.tsx
 
-app.get('/', (c) => {
-  return c.html(`
-    <!DOCTYPE html>
-    <html lang="en">
-    <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>SkillSwap - Learn. Teach. Connect.</title>
+// Export app
         <script src="https://cdn.tailwindcss.com"></script>
         <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
         <style>
           .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
           .card-hover:hover { transform: translateY(-4px); transition: all 0.3s; }
         </style>
-    </head>
-    <body class="bg-gray-50">
-        <!-- Navigation -->
-        <nav class="bg-white shadow-lg">
-            <div class="container mx-auto px-6 py-4">
-                <div class="flex justify-between items-center">
-                    <div class="flex items-center space-x-2">
-                        <i class="fas fa-exchange-alt text-3xl text-purple-600"></i>
-                        <span class="text-2xl font-bold gradient-text">SkillSwap</span>
-                    </div>
-                    <div class="space-x-4">
-                        <button onclick="showLogin()" class="px-6 py-2 text-purple-600 hover:text-purple-800">Login</button>
-                        <button onclick="showRegister()" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Get Started</button>
-                    </div>
-                </div>
-            </div>
-        </nav>
-
-        <!-- Hero Section -->
-        <section class="gradient-bg text-white py-20">
-            <div class="container mx-auto px-6 text-center">
-                <h1 class="text-5xl font-bold mb-6">Learn Any Skill. Teach Your Passion.</h1>
-                <p class="text-xl mb-8 max-w-2xl mx-auto">Connect with a global community of learners and teachers. Exchange skills using our credit-based system. No upfront cash needed.</p>
-                <div class="space-x-4">
-                    <button onclick="showRegister()" class="px-8 py-4 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 text-lg">
-                        Start Learning <i class="fas fa-arrow-right ml-2"></i>
-                    </button>
-                    <button onclick="showRegister()" class="px-8 py-4 border-2 border-white text-white rounded-lg font-semibold hover:bg-white hover:text-purple-600 text-lg">
-                        Start Teaching <i class="fas fa-chalkboard-teacher ml-2"></i>
-                    </button>
-                </div>
-            </div>
-        </section>
-
-        <!-- Features Section -->
-        <section class="py-20">
-            <div class="container mx-auto px-6">
-                <h2 class="text-4xl font-bold text-center mb-16">Why Choose SkillSwap?</h2>
-                <div class="grid md:grid-cols-3 gap-8">
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-coins"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Credit-Based System</h3>
-                        <p class="text-gray-600">Earn credits by teaching and spend them on learning. No upfront payment required. Start with 100 free credits!</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-video"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Live Sessions</h3>
-                        <p class="text-gray-600">Book one-on-one sessions with expert teachers. Interactive learning with video calls, screen sharing, and collaboration tools.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-book-reader"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Micro-Learning Library</h3>
-                        <p class="text-gray-600">Access bite-sized lessons created by the community. Learn at your own pace with quality content.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-star"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Rating & Badges</h3>
-                        <p class="text-gray-600">Build your reputation with reviews and earn badges. Gamified learning keeps you motivated!</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-users"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Community</h3>
-                        <p class="text-gray-600">Join forums, participate in workshops, and connect with like-minded learners worldwide.</p>
-                    </div>
-                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
-                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-globe"></i></div>
-                        <h3 class="text-2xl font-bold mb-4">Global Access</h3>
-                        <p class="text-gray-600">Learn from teachers around the world. Hundreds of skills across tech, creative, lifestyle, and more.</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- Categories Section -->
-        <section class="py-20 bg-gray-100">
-            <div class="container mx-auto px-6">
-                <h2 class="text-4xl font-bold text-center mb-16">Popular Skill Categories</h2>
-                <div class="grid md:grid-cols-5 gap-6">
-                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
-                        <div class="text-5xl mb-4">💻</div>
-                        <h4 class="font-bold text-lg">Technology</h4>
-                        <p class="text-sm text-gray-600 mt-2">Programming, Web Dev, Data Science</p>
-                    </div>
-                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
-                        <div class="text-5xl mb-4">🎨</div>
-                        <h4 class="font-bold text-lg">Creative</h4>
-                        <p class="text-sm text-gray-600 mt-2">Design, Art, Photography, Music</p>
-                    </div>
-                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
-                        <div class="text-5xl mb-4">🗣️</div>
-                        <h4 class="font-bold text-lg">Languages</h4>
-                        <p class="text-sm text-gray-600 mt-2">Spanish, French, Japanese & more</p>
-                    </div>
-                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
-                        <div class="text-5xl mb-4">💼</div>
-                        <h4 class="font-bold text-lg">Business</h4>
-                        <p class="text-sm text-gray-600 mt-2">Marketing, Strategy, Leadership</p>
-                    </div>
-                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
-                        <div class="text-5xl mb-4">🧘</div>
-                        <h4 class="font-bold text-lg">Lifestyle</h4>
-                        <p class="text-sm text-gray-600 mt-2">Yoga, Cooking, Fitness, Wellness</p>
-                    </div>
-                </div>
-            </div>
-        </section>
-
-        <!-- CTA Section -->
-        <section class="gradient-bg text-white py-20">
-            <div class="container mx-auto px-6 text-center">
-                <h2 class="text-4xl font-bold mb-6">Ready to Start Your Learning Journey?</h2>
-                <p class="text-xl mb-8 max-w-2xl mx-auto">Join thousands of learners and teachers already on SkillSwap. Get 100 free credits when you sign up!</p>
-                <button onclick="showRegister()" class="px-8 py-4 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 text-lg">
-                    Join SkillSwap Now <i class="fas fa-rocket ml-2"></i>
-                </button>
-            </div>
-        </section>
-
-        <!-- Footer -->
-        <footer class="bg-gray-900 text-white py-12">
-            <div class="container mx-auto px-6">
-                <div class="grid md:grid-cols-4 gap-8">
-                    <div>
-                        <div class="flex items-center space-x-2 mb-4">
-                            <i class="fas fa-exchange-alt text-2xl"></i>
-                            <span class="text-xl font-bold">SkillSwap</span>
-                        </div>
-                        <p class="text-gray-400">Learn. Teach. Connect.</p>
-                    </div>
-                    <div>
-                        <h4 class="font-bold mb-4">Platform</h4>
-                        <ul class="space-y-2 text-gray-400">
-                            <li><a href="#" class="hover:text-white">Browse Skills</a></li>
-                            <li><a href="#" class="hover:text-white">Find Teachers</a></li>
-                            <li><a href="#" class="hover:text-white">Start Teaching</a></li>
-                            <li><a href="#" class="hover:text-white">Pricing</a></li>
-                        </ul>
-                    </div>
-                    <div>
-                        <h4 class="font-bold mb-4">Resources</h4>
-                        <ul class="space-y-2 text-gray-400">
-                            <li><a href="#" class="hover:text-white">Help Center</a></li>
-                            <li><a href="#" class="hover:text-white">Community</a></li>
-                            <li><a href="#" class="hover:text-white">Blog</a></li>
-                            <li><a href="#" class="hover:text-white">API Docs</a></li>
-                        </ul>
-                    </div>
-                    <div>
-                        <h4 class="font-bold mb-4">Legal</h4>
-                        <ul class="space-y-2 text-gray-400">
-                            <li><a href="#" class="hover:text-white">Privacy Policy</a></li>
-                            <li><a href="#" class="hover:text-white">Terms of Service</a></li>
-                            <li><a href="#" class="hover:text-white">Cookie Policy</a></li>
-                        </ul>
-                    </div>
-                </div>
-                <div class="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
-                    <p>&copy; 2025 SkillSwap. Built with Hono + Cloudflare Pages. All rights reserved.</p>
-                </div>
-            </div>
-        </footer>
-
-        <!-- Auth Modal (Login/Register) -->
-        <div id="authModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
-            <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
-                <div class="flex justify-between items-center mb-6">
-                    <h3 id="modalTitle" class="text-2xl font-bold">Login</h3>
-                    <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
-                        <i class="fas fa-times text-xl"></i>
-                    </button>
-                </div>
-                
-                <div id="loginForm">
-                    <div class="mb-4">
-                        <label class="block text-gray-700 mb-2">Email</label>
-                        <input type="email" id="loginEmail" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="you@example.com">
-                    </div>
-                    <div class="mb-6">
-                        <label class="block text-gray-700 mb-2">Password</label>
-                        <input type="password" id="loginPassword" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="••••••••">
-                    </div>
-                    <button onclick="handleLogin()" class="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 font-semibold mb-4">
-                        Login
-                    </button>
-                    <div class="text-center">
-                        <p class="text-gray-600">Don't have an account? 
-                            <button onclick="switchToRegister()" class="text-purple-600 hover:text-purple-800 font-semibold">Register</button>
-                        </p>
-                    </div>
-                </div>
-
-                <div id="registerForm" class="hidden">
-                    <div class="mb-4">
-                        <label class="block text-gray-700 mb-2">Full Name</label>
-                        <input type="text" id="registerName" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="John Doe">
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-gray-700 mb-2">Email</label>
-                        <input type="email" id="registerEmail" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="you@example.com">
-                    </div>
-                    <div class="mb-4">
-                        <label class="block text-gray-700 mb-2">Password</label>
-                        <input type="password" id="registerPassword" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="••••••••">
-                    </div>
-                    <div class="mb-6">
-                        <label class="block text-gray-700 mb-2">I want to</label>
-                        <select id="registerRole" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600">
-                            <option value="both">Learn and Teach</option>
-                            <option value="learner">Learn Only</option>
-                            <option value="teacher">Teach Only</option>
-                        </select>
-                    </div>
-                    <button onclick="handleRegister()" class="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 font-semibold mb-4">
-                        Create Account
-                    </button>
-                    <div class="text-center">
-                        <p class="text-gray-600">Already have an account? 
-                            <button onclick="switchToLogin()" class="text-purple-600 hover:text-purple-800 font-semibold">Login</button>
-                        </p>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
-        <script>
-            const API_BASE = '/api';
-            let authToken = localStorage.getItem('authToken');
-
-            function showLogin() {
-                document.getElementById('authModal').classList.remove('hidden');
-                document.getElementById('authModal').classList.add('flex');
-                switchToLogin();
-            }
-
-            function showRegister() {
-                document.getElementById('authModal').classList.remove('hidden');
-                document.getElementById('authModal').classList.add('flex');
-                switchToRegister();
-            }
-
-            function closeModal() {
-                document.getElementById('authModal').classList.add('hidden');
-                document.getElementById('authModal').classList.remove('flex');
-            }
-
-            function switchToLogin() {
-                document.getElementById('modalTitle').textContent = 'Login';
-                document.getElementById('loginForm').classList.remove('hidden');
-                document.getElementById('registerForm').classList.add('hidden');
-            }
-
-            function switchToRegister() {
-                document.getElementById('modalTitle').textContent = 'Create Account';
-                document.getElementById('loginForm').classList.add('hidden');
-                document.getElementById('registerForm').classList.remove('hidden');
-            }
-
-            async function handleLogin() {
-                const email = document.getElementById('loginEmail').value;
-                const password = document.getElementById('loginPassword').value;
-
-                if (!email || !password) {
-                    alert('Please fill in all fields');
-                    return;
-                }
-
-                try {
-                    const response = await axios.post(API_BASE + '/auth/login', { email, password });
-                    if (response.data.success) {
-                        localStorage.setItem('authToken', response.data.data.token);
-                        localStorage.setItem('user', JSON.stringify(response.data.data.user));
-                        alert('Login successful! Redirecting to dashboard...');
-                        window.location.href = '/dashboard.html';
-                    }
-                } catch (error) {
-                    alert(error.response?.data?.error || 'Login failed');
-                }
-            }
-
-            async function handleRegister() {
-                const name = document.getElementById('registerName').value;
-                const email = document.getElementById('registerEmail').value;
-                const password = document.getElementById('registerPassword').value;
-                const role = document.getElementById('registerRole').value;
-
-                if (!name || !email || !password) {
-                    alert('Please fill in all fields');
-                    return;
-                }
-
-                try {
-                    const response = await axios.post(API_BASE + '/auth/register', { name, email, password, role });
-                    if (response.data.success) {
-                        localStorage.setItem('authToken', response.data.data.token);
-                        localStorage.setItem('user', JSON.stringify(response.data.data.user));
-                        alert('Registration successful! Welcome to SkillSwap! 🎉');
-                        window.location.href = '/dashboard.html';
-                    }
-                } catch (error) {
-                    alert(error.response?.data?.error || 'Registration failed');
-                }
-            }
-
-            // Demo login for testing
-            window.demoLogin = async function() {
-                document.getElementById('loginEmail').value = 'alice@skillswap.com';
-                document.getElementById('loginPassword').value = 'password123';
-                await handleLogin();
-            }
-        </script>
-    </body>
-    </html>
-  `)
-})
-
-export default app
