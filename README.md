@@ -8,9 +8,12 @@ A revolutionary peer-to-peer skill exchange platform where users can teach and l
 **Production:** Will be deployed to Cloudflare Pages
 
 ### Demo Credentials
-- **Email:** test@skillswap.com
-- **Password:** password123
-- **Starting Credits:** 100 (free welcome bonus)
+- **Register new account** at the homepage (gets 100 free welcome credits)
+- **Or use seeded user:**
+  - Email: `alice@skillswap.com`
+  - Email: `bob@skillswap.com` 
+  - Email: `carol@skillswap.com`
+  - *(Note: Passwords are hashed in seed data - register new account recommended)*
 
 ## 📋 Project Overview
 
@@ -28,19 +31,32 @@ SkillSwap is a unique platform that solves the friction of traditional learning 
 
 ## ✨ Features Implemented
 
+### 🎨 UI/UX Design (UPDATED)
+- [x] **Apple-inspired design language** - Clean, minimal aesthetics
+- [x] **Inter font family** - Modern typography
+- [x] **Glassmorphism effects** - Frosted glass navigation and cards
+- [x] **#0071e3 Apple blue** - Signature brand color
+- [x] **980px border radius** - Signature rounded buttons
+- [x] **Responsive design** - Mobile-first approach
+- [x] **Working interactive buttons** - All UI elements functional
+
 ### 🔐 Authentication & User Management
 - [x] Email/password registration and login
 - [x] JWT-based authentication
 - [x] User roles (Learner, Teacher, Both)
 - [x] Profile management with bio and avatar
 - [x] 100 free welcome credits for new users
+- [ ] OAuth login (Google, Microsoft, Apple) - Placeholders added
 
-### 💳 Credit System
-- [x] Virtual credit wallet
+### 💳 Credit System & Payments
+- [x] Virtual credit wallet with real-time balance display
 - [x] Transaction history tracking
-- [x] Credit purchase system (Stripe-ready placeholder)
+- [x] Credit purchase UI with 3 packages ($10, $45, $80)
 - [x] Automatic credit transfers on session completion
 - [x] Balance protection and validation
+- [x] **Pricing tiers display** - Free, Pro ($9.99), Enterprise ($49.99)
+- [ ] Stripe payment integration - Placeholder API endpoints ready
+- [ ] Subscription management system
 
 ### 🎯 Core Features
 - [x] **Skill Discovery:** Browse 15+ skills across 5 categories
@@ -78,8 +94,10 @@ SkillSwap is a unique platform that solves the friction of traditional learning 
 ## 🏗 Technical Architecture
 
 ### Frontend
-- **Framework:** Vanilla JavaScript with TailwindCSS
-- **UI Library:** TailwindCSS (via CDN)
+- **Framework:** Vanilla JavaScript with Apple-inspired design
+- **UI Library:** TailwindCSS (via CDN) + Custom Apple CSS
+- **Typography:** Inter font family (Google Fonts)
+- **Design System:** Apple Design Language (#0071e3, glassmorphism, 980px radius)
 - **Icons:** FontAwesome 6
 - **HTTP Client:** Axios
 - **Responsive:** Mobile-first design
@@ -343,10 +361,12 @@ npx wrangler pages secret put STRIPE_API_KEY --project-name skillswap
 ## 📈 Performance Metrics
 
 ### Current Status
-- **Build Time:** ~2.8s
+- **Build Time:** ~2.3s (Vite optimization)
 - **API Response:** <100ms (local)
 - **Database Queries:** Indexed and optimized
-- **Bundle Size:** 68.64 kB (Worker)
+- **Bundle Size:** 95.57 kB (Worker with Apple UI)
+- **Database:** 14 tables, 252 rows seeded
+- **UI Framework:** Apple-inspired design system
 - **Lighthouse Score:** (To be measured)
 
 ### Expected Production Performance
@@ -391,12 +411,15 @@ This project is licensed under the MIT License - see LICENSE file for details.
 
 ### Immediate (Pre-Launch)
 1. ✅ Complete MVP development
-2. ⏳ Push to GitHub
-3. ⏳ Deploy to Cloudflare Pages production
-4. ⏳ Set up monitoring (Sentry, LogRocket)
-5. ⏳ Create demo video
-6. ⏳ Write launch announcement
-7. ⏳ Set up social media accounts
+2. ✅ Apple UI redesign with working buttons
+3. ✅ Fix 404 dashboard redirect error
+4. ✅ Local database migrations applied
+5. ⏳ Push to GitHub
+6. ⏳ Deploy to Cloudflare Pages production
+7. ⏳ OAuth integration (requires Google/Microsoft/Apple API keys)
+8. ⏳ Stripe payment integration (requires API key)
+9. ⏳ Set up monitoring (Sentry, LogRocket)
+10. ⏳ Create demo video
 
 ### Short-term (Week 1-4)
 - User feedback collection
