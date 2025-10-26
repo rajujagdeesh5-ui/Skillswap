@@ -1,12 +1,1242 @@
 import { Hono } from 'hono'
-import { renderer } from './renderer'
+import { cors } from 'hono/cors'
+import { serveStatic } from 'hono/cloudflare-workers'
+import type { Bindings, ApiResponse, User, Session, Skill, LearningContent, UserWithStats } from './types'
+import { hashPassword, verifyPassword, createAuthToken, getUserFromAuth, isValidEmail } from './utils/auth'
+import { query, queryOne, execute, paginate, buildSearchQuery, getIntParam, formatDate } from './utils/db'
 
-const app = new Hono()
+const app = new Hono<{ Bindings: Bindings }>()
 
-app.use(renderer)
+// Enable CORS
+app.use('/api/*', cors())
+
+// Serve static files
+app.use('/static/*', serveStatic({ root: './public' }))
+
+// ==================== AUTHENTICATION ROUTES ====================
+
+// Register new user
+app.post('/api/auth/register', async (c) => {
+  try {
+    const { email, password, name, role = 'both' } = await c.req.json()
+
+    // Validate input
+    if (!email || !password || !name) {
+      return c.json<ApiResponse>({ success: false, error: 'Email, password, and name are required' }, 400)
+    }
+
+    if (!isValidEmail(email)) {
+      return c.json<ApiResponse>({ success: false, error: 'Invalid email format' }, 400)
+    }
+
+    if (password.length < 6) {
+      return c.json<ApiResponse>({ success: false, error: 'Password must be at least 6 characters' }, 400)
+    }
+
+    // Check if user exists
+    const existing = await queryOne<User>(c.env.DB, 'SELECT id FROM users WHERE email = ?', [email])
+    if (existing) {
+      return c.json<ApiResponse>({ success: false, error: 'Email already registered' }, 400)
+    }
+
+    // Hash password and create user
+    const passwordHash = await hashPassword(password)
+    const result = await execute(c.env.DB, 
+      'INSERT INTO users (email, password_hash, name, role, credit_balance) VALUES (?, ?, ?, ?, 100)',
+      [email, passwordHash, name, role]
+    )
+
+    // Create welcome transaction
+    await execute(c.env.DB,
+      'INSERT INTO credit_transactions (user_id, amount, transaction_type, description, balance_after) VALUES (?, 100, ?, ?, 100)',
+      [result.meta.last_row_id, 'bonus', 'Welcome bonus']
+    )
+
+    // Create welcome notification
+    await execute(c.env.DB,
+      'INSERT INTO notifications (user_id, title, message, type) VALUES (?, ?, ?, ?)',
+      [result.meta.last_row_id, 'Welcome to SkillSwap!', 'You received 100 credits to get started. Happy learning!', 'credit']
+    )
+
+    const token = createAuthToken(result.meta.last_row_id as number, email)
+
+    return c.json<ApiResponse>({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: result.meta.last_row_id,
+          email,
+          name,
+          role,
+          credit_balance: 100
+        }
+      },
+      message: 'Registration successful!'
+    })
+  } catch (error) {
+    console.error('Registration error:', error)
+    return c.json<ApiResponse>({ success: false, error: 'Registration failed' }, 500)
+  }
+})
+
+// Login
+app.post('/api/auth/login', async (c) => {
+  try {
+    const { email, password } = await c.req.json()
+
+    if (!email || !password) {
+      return c.json<ApiResponse>({ success: false, error: 'Email and password are required' }, 400)
+    }
+
+    // Find user
+    const user = await queryOne<User>(c.env.DB, 
+      'SELECT id, email, password_hash, name, role, credit_balance, is_premium, is_admin FROM users WHERE email = ? AND is_active = 1',
+      [email]
+    )
+
+    if (!user) {
+      return c.json<ApiResponse>({ success: false, error: 'Invalid credentials' }, 401)
+    }
+
+    // Verify password
+    const isValid = await verifyPassword(password, user.password_hash!)
+    if (!isValid) {
+      return c.json<ApiResponse>({ success: false, error: 'Invalid credentials' }, 401)
+    }
+
+    // Update last login
+    await execute(c.env.DB, 'UPDATE users SET last_login = ? WHERE id = ?', [formatDate(), user.id])
+
+    const token = createAuthToken(user.id, user.email)
+
+    return c.json<ApiResponse>({
+      success: true,
+      data: {
+        token,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          role: user.role,
+          credit_balance: user.credit_balance,
+          is_premium: user.is_premium,
+          is_admin: user.is_admin
+        }
+      }
+    })
+  } catch (error) {
+    console.error('Login error:', error)
+    return c.json<ApiResponse>({ success: false, error: 'Login failed' }, 500)
+  }
+})
+
+// Get current user
+app.get('/api/auth/me', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const user = await queryOne<User>(c.env.DB,
+    'SELECT id, email, name, bio, avatar_url, role, credit_balance, is_premium, is_admin, language_preference, created_at FROM users WHERE id = ?',
+    [authUser.userId]
+  )
+
+  if (!user) {
+    return c.json<ApiResponse>({ success: false, error: 'User not found' }, 404)
+  }
+
+  return c.json<ApiResponse>({ success: true, data: user })
+})
+
+// ==================== USER PROFILE ROUTES ====================
+
+// Get user profile with stats
+app.get('/api/users/:id', async (c) => {
+  const userId = getIntParam(c.req.param('id'))
+
+  const user = await queryOne<UserWithStats>(c.env.DB, `
+    SELECT 
+      u.*,
+      (SELECT COUNT(*) FROM sessions WHERE teacher_id = u.id AND status = 'completed') as total_sessions_taught,
+      (SELECT COUNT(*) FROM sessions WHERE learner_id = u.id AND status = 'completed') as total_sessions_learned,
+      (SELECT ROUND(AVG(rating), 1) FROM reviews WHERE reviewee_id = u.id) as average_rating,
+      (SELECT COUNT(*) FROM reviews WHERE reviewee_id = u.id) as total_reviews,
+      (SELECT COUNT(*) FROM user_badges WHERE user_id = u.id) as badges_earned
+    FROM users u
+    WHERE u.id = ? AND u.is_active = 1
+  `, [userId])
+
+  if (!user) {
+    return c.json<ApiResponse>({ success: false, error: 'User not found' }, 404)
+  }
+
+  // Remove password hash
+  delete user.password_hash
+
+  return c.json<ApiResponse>({ success: true, data: user })
+})
+
+// Update user profile
+app.put('/api/users/:id', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const userId = getIntParam(c.req.param('id'))
+  if (authUser.userId !== userId) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const { name, bio, avatar_url, language_preference } = await c.req.json()
+
+  await execute(c.env.DB,
+    'UPDATE users SET name = COALESCE(?, name), bio = COALESCE(?, bio), avatar_url = COALESCE(?, avatar_url), language_preference = COALESCE(?, language_preference) WHERE id = ?',
+    [name, bio, avatar_url, language_preference, userId]
+  )
+
+  return c.json<ApiResponse>({ success: true, message: 'Profile updated successfully' })
+})
+
+// Get user skills
+app.get('/api/users/:id/skills', async (c) => {
+  const userId = getIntParam(c.req.param('id'))
+
+  const skills = await query(c.env.DB, `
+    SELECT us.*, s.name as skill_name, s.category, s.icon
+    FROM user_skills us
+    JOIN skills s ON us.skill_id = s.id
+    WHERE us.user_id = ?
+    ORDER BY us.skill_type, s.name
+  `, [userId])
+
+  return c.json<ApiResponse>({ success: true, data: skills })
+})
+
+// Add user skill
+app.post('/api/users/:id/skills', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const userId = getIntParam(c.req.param('id'))
+  if (authUser.userId !== userId) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const { skill_id, skill_type, proficiency_level, hourly_credit_rate } = await c.req.json()
+
+  try {
+    await execute(c.env.DB,
+      'INSERT INTO user_skills (user_id, skill_id, skill_type, proficiency_level, hourly_credit_rate) VALUES (?, ?, ?, ?, ?)',
+      [userId, skill_id, skill_type, proficiency_level, hourly_credit_rate]
+    )
+
+    return c.json<ApiResponse>({ success: true, message: 'Skill added successfully' })
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Skill already exists or invalid data' }, 400)
+  }
+})
+
+// ==================== SKILLS ROUTES ====================
+
+// Get all skills
+app.get('/api/skills', async (c) => {
+  const category = c.req.query('category')
+  const search = c.req.query('search')
+
+  let sql = 'SELECT * FROM skills WHERE is_active = 1'
+  const params: any[] = []
+
+  if (category) {
+    sql += ' AND category = ?'
+    params.push(category)
+  }
+
+  if (search) {
+    const { condition, params: searchParams } = buildSearchQuery(['name', 'description'], search)
+    sql += ` AND ${condition}`
+    params.push(...searchParams)
+  }
+
+  sql += ' ORDER BY name'
+
+  const skills = await query<Skill>(c.env.DB, sql, params)
+
+  return c.json<ApiResponse>({ success: true, data: skills })
+})
+
+// Get teachers for a skill
+app.get('/api/skills/:id/teachers', async (c) => {
+  const skillId = getIntParam(c.req.param('id'))
+
+  const teachers = await query(c.env.DB, `
+    SELECT 
+      u.id, u.name, u.bio, u.avatar_url, u.is_premium,
+      us.proficiency_level, us.hourly_credit_rate,
+      (SELECT ROUND(AVG(rating), 1) FROM reviews WHERE reviewee_id = u.id) as average_rating,
+      (SELECT COUNT(*) FROM sessions WHERE teacher_id = u.id AND status = 'completed') as total_sessions
+    FROM user_skills us
+    JOIN users u ON us.user_id = u.id
+    WHERE us.skill_id = ? AND us.skill_type = 'teach' AND u.is_active = 1
+    ORDER BY average_rating DESC, total_sessions DESC
+  `, [skillId])
+
+  return c.json<ApiResponse>({ success: true, data: teachers })
+})
+
+// ==================== SESSIONS ROUTES ====================
+
+// Get sessions (filtered)
+app.get('/api/sessions', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const status = c.req.query('status')
+  const role = c.req.query('role') // 'teacher' or 'learner'
+  const page = getIntParam(c.req.query('page'), 1)
+  const limit = getIntParam(c.req.query('limit'), 10)
+
+  let sql = `
+    SELECT 
+      s.*,
+      t.name as teacher_name, t.avatar_url as teacher_avatar,
+      l.name as learner_name, l.avatar_url as learner_avatar,
+      sk.name as skill_name, sk.icon as skill_icon
+    FROM sessions s
+    JOIN users t ON s.teacher_id = t.id
+    JOIN users l ON s.learner_id = l.id
+    JOIN skills sk ON s.skill_id = sk.id
+    WHERE (s.teacher_id = ? OR s.learner_id = ?)
+  `
+  const params: any[] = [authUser.userId, authUser.userId]
+
+  if (status) {
+    sql += ' AND s.status = ?'
+    params.push(status)
+  }
+
+  if (role === 'teacher') {
+    sql += ' AND s.teacher_id = ?'
+    params.push(authUser.userId)
+  } else if (role === 'learner') {
+    sql += ' AND s.learner_id = ?'
+    params.push(authUser.userId)
+  }
+
+  sql += ' ORDER BY s.scheduled_date DESC'
+
+  const result = await paginate(c.env.DB, sql, params, page, limit)
+
+  return c.json<ApiResponse>({ success: true, data: result.data, pagination: result })
+})
+
+// Get single session
+app.get('/api/sessions/:id', async (c) => {
+  const sessionId = getIntParam(c.req.param('id'))
+
+  const session = await queryOne(c.env.DB, `
+    SELECT 
+      s.*,
+      t.name as teacher_name, t.email as teacher_email, t.avatar_url as teacher_avatar,
+      l.name as learner_name, l.email as learner_email, l.avatar_url as learner_avatar,
+      sk.name as skill_name, sk.category, sk.icon
+    FROM sessions s
+    JOIN users t ON s.teacher_id = t.id
+    JOIN users l ON s.learner_id = l.id
+    JOIN skills sk ON s.skill_id = sk.id
+    WHERE s.id = ?
+  `, [sessionId])
+
+  if (!session) {
+    return c.json<ApiResponse>({ success: false, error: 'Session not found' }, 404)
+  }
+
+  return c.json<ApiResponse>({ success: true, data: session })
+})
+
+// Create session booking
+app.post('/api/sessions', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  try {
+    const { teacher_id, skill_id, title, description, scheduled_date, duration_minutes } = await c.req.json()
+
+    // Get teacher's rate
+    const teacherSkill = await queryOne<{ hourly_credit_rate: number }>(c.env.DB,
+      'SELECT hourly_credit_rate FROM user_skills WHERE user_id = ? AND skill_id = ? AND skill_type = ?',
+      [teacher_id, skill_id, 'teach']
+    )
+
+    if (!teacherSkill) {
+      return c.json<ApiResponse>({ success: false, error: 'Teacher does not teach this skill' }, 400)
+    }
+
+    const credit_cost = Math.round((teacherSkill.hourly_credit_rate * duration_minutes) / 60)
+
+    // Check learner's balance
+    const learner = await queryOne<User>(c.env.DB, 'SELECT credit_balance FROM users WHERE id = ?', [authUser.userId])
+    if (!learner || learner.credit_balance < credit_cost) {
+      return c.json<ApiResponse>({ success: false, error: 'Insufficient credits' }, 400)
+    }
+
+    // Create session
+    const result = await execute(c.env.DB,
+      'INSERT INTO sessions (teacher_id, learner_id, skill_id, title, description, scheduled_date, duration_minutes, credit_cost, status) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [teacher_id, authUser.userId, skill_id, title, description, scheduled_date, duration_minutes, credit_cost, 'pending']
+    )
+
+    // Create notification for teacher
+    await execute(c.env.DB,
+      'INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [teacher_id, 'New Session Request', `You have a new session request for "${title}"`, 'session', 'session', result.meta.last_row_id]
+    )
+
+    return c.json<ApiResponse>({
+      success: true,
+      data: { session_id: result.meta.last_row_id, credit_cost },
+      message: 'Session request sent successfully!'
+    })
+  } catch (error) {
+    console.error('Session creation error:', error)
+    return c.json<ApiResponse>({ success: false, error: 'Failed to create session' }, 500)
+  }
+})
+
+// Update session status (confirm/decline/complete/cancel)
+app.patch('/api/sessions/:id', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const sessionId = getIntParam(c.req.param('id'))
+  const { status, meeting_link, notes } = await c.req.json()
+
+  const session = await queryOne<Session>(c.env.DB, 'SELECT * FROM sessions WHERE id = ?', [sessionId])
+  if (!session) {
+    return c.json<ApiResponse>({ success: false, error: 'Session not found' }, 404)
+  }
+
+  // Check authorization
+  if (session.teacher_id !== authUser.userId && session.learner_id !== authUser.userId) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  // Handle different status updates
+  if (status === 'confirmed' && session.teacher_id === authUser.userId) {
+    // Teacher confirms - deduct credits from learner
+    await execute(c.env.DB,
+      'UPDATE users SET credit_balance = credit_balance - ? WHERE id = ?',
+      [session.credit_cost, session.learner_id]
+    )
+
+    // Record transaction
+    const learner = await queryOne<User>(c.env.DB, 'SELECT credit_balance FROM users WHERE id = ?', [session.learner_id])
+    await execute(c.env.DB,
+      'INSERT INTO credit_transactions (user_id, amount, transaction_type, reference_type, reference_id, description, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [session.learner_id, -session.credit_cost, 'spent', 'session', sessionId, `Session: ${session.title}`, (learner?.credit_balance || 0) - session.credit_cost]
+    )
+
+    // Notify learner
+    await execute(c.env.DB,
+      'INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [session.learner_id, 'Session Confirmed!', `Your session "${session.title}" has been confirmed`, 'session', 'session', sessionId]
+    )
+  }
+
+  if (status === 'completed') {
+    // Credit teacher
+    await execute(c.env.DB,
+      'UPDATE users SET credit_balance = credit_balance + ? WHERE id = ?',
+      [session.credit_cost, session.teacher_id]
+    )
+
+    const teacher = await queryOne<User>(c.env.DB, 'SELECT credit_balance FROM users WHERE id = ?', [session.teacher_id])
+    await execute(c.env.DB,
+      'INSERT INTO credit_transactions (user_id, amount, transaction_type, reference_type, reference_id, description, balance_after) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      [session.teacher_id, session.credit_cost, 'earned', 'session', sessionId, `Teaching: ${session.title}`, (teacher?.credit_balance || 0) + session.credit_cost]
+    )
+
+    // Notify both parties to leave reviews
+    await execute(c.env.DB,
+      'INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?), (?, ?, ?, ?, ?, ?)',
+      [
+        session.teacher_id, 'Session Completed', 'Please rate your experience', 'session', 'session', sessionId,
+        session.learner_id, 'Session Completed', 'Please rate your experience', 'session', 'session', sessionId
+      ]
+    )
+  }
+
+  // Update session
+  await execute(c.env.DB,
+    'UPDATE sessions SET status = COALESCE(?, status), meeting_link = COALESCE(?, meeting_link), notes = COALESCE(?, notes), updated_at = ? WHERE id = ?',
+    [status, meeting_link, notes, formatDate(), sessionId]
+  )
+
+  return c.json<ApiResponse>({ success: true, message: 'Session updated successfully' })
+})
+
+// ==================== REVIEWS ROUTES ====================
+
+// Get reviews for a user
+app.get('/api/users/:id/reviews', async (c) => {
+  const userId = getIntParam(c.req.param('id'))
+
+  const reviews = await query(c.env.DB, `
+    SELECT 
+      r.*,
+      u.name as reviewer_name, u.avatar_url as reviewer_avatar,
+      s.title as session_title
+    FROM reviews r
+    JOIN users u ON r.reviewer_id = u.id
+    JOIN sessions s ON r.session_id = s.id
+    WHERE r.reviewee_id = ?
+    ORDER BY r.created_at DESC
+  `, [userId])
+
+  return c.json<ApiResponse>({ success: true, data: reviews })
+})
+
+// Create review
+app.post('/api/reviews', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  try {
+    const { session_id, reviewee_id, rating, comment } = await c.req.json()
+
+    if (rating < 1 || rating > 5) {
+      return c.json<ApiResponse>({ success: false, error: 'Rating must be between 1 and 5' }, 400)
+    }
+
+    // Verify session exists and user was part of it
+    const session = await queryOne<Session>(c.env.DB,
+      'SELECT * FROM sessions WHERE id = ? AND (teacher_id = ? OR learner_id = ?) AND status = ?',
+      [session_id, authUser.userId, authUser.userId, 'completed']
+    )
+
+    if (!session) {
+      return c.json<ApiResponse>({ success: false, error: 'Session not found or not completed' }, 404)
+    }
+
+    await execute(c.env.DB,
+      'INSERT INTO reviews (session_id, reviewer_id, reviewee_id, rating, comment) VALUES (?, ?, ?, ?, ?)',
+      [session_id, authUser.userId, reviewee_id, rating, comment]
+    )
+
+    // Notify reviewee
+    await execute(c.env.DB,
+      'INSERT INTO notifications (user_id, title, message, type, reference_type, reference_id) VALUES (?, ?, ?, ?, ?, ?)',
+      [reviewee_id, 'New Review Received', `You received a ${rating}-star review`, 'review', 'session', session_id]
+    )
+
+    return c.json<ApiResponse>({ success: true, message: 'Review submitted successfully' })
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to submit review' }, 500)
+  }
+})
+
+// ==================== CREDIT ROUTES ====================
+
+// Get user transactions
+app.get('/api/users/:id/transactions', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const userId = getIntParam(c.req.param('id'))
+  if (authUser.userId !== userId) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const transactions = await query(c.env.DB,
+    'SELECT * FROM credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+    [userId]
+  )
+
+  return c.json<ApiResponse>({ success: true, data: transactions })
+})
+
+// Purchase credits (placeholder - integrate with Stripe)
+app.post('/api/credits/purchase', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const { amount, payment_intent_id } = await c.req.json()
+
+  if (amount < 10) {
+    return c.json<ApiResponse>({ success: false, error: 'Minimum purchase is 10 credits' }, 400)
+  }
+
+  // TODO: Integrate with Stripe payment processing
+  // For now, we'll simulate a successful purchase
+  
+  // Update user balance
+  await execute(c.env.DB,
+    'UPDATE users SET credit_balance = credit_balance + ? WHERE id = ?',
+    [amount, authUser.userId]
+  )
+
+  const user = await queryOne<User>(c.env.DB, 'SELECT credit_balance FROM users WHERE id = ?', [authUser.userId])
+
+  // Record transaction
+  await execute(c.env.DB,
+    'INSERT INTO credit_transactions (user_id, amount, transaction_type, description, balance_after) VALUES (?, ?, ?, ?, ?)',
+    [authUser.userId, amount, 'purchase', `Purchased ${amount} credits`, user?.credit_balance || amount]
+  )
+
+  // Notify user
+  await execute(c.env.DB,
+    'INSERT INTO notifications (user_id, title, message, type) VALUES (?, ?, ?, ?)',
+    [authUser.userId, 'Credits Added', `${amount} credits added to your wallet`, 'credit']
+  )
+
+  return c.json<ApiResponse>({
+    success: true,
+    data: { new_balance: user?.credit_balance },
+    message: 'Credits purchased successfully'
+  })
+})
+
+// ==================== LEARNING CONTENT ROUTES ====================
+
+// Get learning content
+app.get('/api/content', async (c) => {
+  const skill_id = c.req.query('skill_id')
+  const difficulty = c.req.query('difficulty')
+  const page = getIntParam(c.req.query('page'), 1)
+  const limit = getIntParam(c.req.query('limit'), 12)
+
+  let sql = `
+    SELECT 
+      lc.*,
+      u.name as creator_name, u.avatar_url as creator_avatar,
+      s.name as skill_name, s.icon as skill_icon
+    FROM learning_content lc
+    JOIN users u ON lc.creator_id = u.id
+    JOIN skills s ON lc.skill_id = s.id
+    WHERE lc.is_approved = 1
+  `
+  const params: any[] = []
+
+  if (skill_id) {
+    sql += ' AND lc.skill_id = ?'
+    params.push(getIntParam(skill_id))
+  }
+
+  if (difficulty) {
+    sql += ' AND lc.difficulty_level = ?'
+    params.push(difficulty)
+  }
+
+  sql += ' ORDER BY lc.created_at DESC'
+
+  const result = await paginate(c.env.DB, sql, params, page, limit)
+
+  return c.json<ApiResponse>({ success: true, data: result.data, pagination: result })
+})
+
+// Get single content
+app.get('/api/content/:id', async (c) => {
+  const contentId = getIntParam(c.req.param('id'))
+
+  const content = await queryOne(c.env.DB, `
+    SELECT 
+      lc.*,
+      u.name as creator_name, u.avatar_url as creator_avatar,
+      s.name as skill_name, s.category, s.icon
+    FROM learning_content lc
+    JOIN users u ON lc.creator_id = u.id
+    JOIN skills s ON lc.skill_id = s.id
+    WHERE lc.id = ?
+  `, [contentId])
+
+  if (!content) {
+    return c.json<ApiResponse>({ success: false, error: 'Content not found' }, 404)
+  }
+
+  // Increment view count
+  await execute(c.env.DB, 'UPDATE learning_content SET view_count = view_count + 1 WHERE id = ?', [contentId])
+
+  return c.json<ApiResponse>({ success: true, data: content })
+})
+
+// Create learning content
+app.post('/api/content', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  try {
+    const { skill_id, title, description, content_type, content_url, thumbnail_url, duration_minutes, difficulty_level } = await c.req.json()
+
+    const result = await execute(c.env.DB,
+      'INSERT INTO learning_content (creator_id, skill_id, title, description, content_type, content_url, thumbnail_url, duration_minutes, difficulty_level) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)',
+      [authUser.userId, skill_id, title, description, content_type, content_url, thumbnail_url, duration_minutes, difficulty_level]
+    )
+
+    return c.json<ApiResponse>({
+      success: true,
+      data: { content_id: result.meta.last_row_id },
+      message: 'Content submitted for review'
+    })
+  } catch (error) {
+    return c.json<ApiResponse>({ success: false, error: 'Failed to create content' }, 500)
+  }
+})
+
+// ==================== NOTIFICATIONS ROUTES ====================
+
+// Get user notifications
+app.get('/api/notifications', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const notifications = await query(c.env.DB,
+    'SELECT * FROM notifications WHERE user_id = ? ORDER BY created_at DESC LIMIT 50',
+    [authUser.userId]
+  )
+
+  const unread_count = await queryOne<{ count: number }>(c.env.DB,
+    'SELECT COUNT(*) as count FROM notifications WHERE user_id = ? AND is_read = 0',
+    [authUser.userId]
+  )
+
+  return c.json<ApiResponse>({
+    success: true,
+    data: {
+      notifications,
+      unread_count: unread_count?.count || 0
+    }
+  })
+})
+
+// Mark notification as read
+app.patch('/api/notifications/:id', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const notificationId = getIntParam(c.req.param('id'))
+
+  await execute(c.env.DB,
+    'UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?',
+    [notificationId, authUser.userId]
+  )
+
+  return c.json<ApiResponse>({ success: true, message: 'Notification marked as read' })
+})
+
+// ==================== DASHBOARD ROUTES ====================
+
+// Get dashboard data
+app.get('/api/dashboard', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  // Get user info
+  const user = await queryOne<User>(c.env.DB, 'SELECT * FROM users WHERE id = ?', [authUser.userId])
+
+  // Get upcoming sessions
+  const upcoming_sessions = await query(c.env.DB, `
+    SELECT 
+      s.*,
+      CASE WHEN s.teacher_id = ? THEN l.name ELSE t.name END as other_user_name,
+      CASE WHEN s.teacher_id = ? THEN l.avatar_url ELSE t.avatar_url END as other_user_avatar,
+      sk.name as skill_name, sk.icon as skill_icon
+    FROM sessions s
+    JOIN users t ON s.teacher_id = t.id
+    JOIN users l ON s.learner_id = l.id
+    JOIN skills sk ON s.skill_id = sk.id
+    WHERE (s.teacher_id = ? OR s.learner_id = ?)
+      AND s.status IN ('pending', 'confirmed')
+      AND s.scheduled_date >= ?
+    ORDER BY s.scheduled_date
+    LIMIT 5
+  `, [authUser.userId, authUser.userId, authUser.userId, authUser.userId, formatDate()])
+
+  // Get recent activity
+  const recent_transactions = await query(c.env.DB,
+    'SELECT * FROM credit_transactions WHERE user_id = ? ORDER BY created_at DESC LIMIT 5',
+    [authUser.userId]
+  )
+
+  // Get recommended content
+  const recommended_content = await query(c.env.DB, `
+    SELECT 
+      lc.*,
+      u.name as creator_name,
+      s.name as skill_name, s.icon as skill_icon
+    FROM learning_content lc
+    JOIN users u ON lc.creator_id = u.id
+    JOIN skills s ON lc.skill_id = s.id
+    WHERE lc.is_approved = 1
+    ORDER BY lc.view_count DESC, lc.created_at DESC
+    LIMIT 6
+  `)
+
+  // Get stats
+  const stats = await queryOne(c.env.DB, `
+    SELECT 
+      (SELECT COUNT(*) FROM sessions WHERE (teacher_id = ? OR learner_id = ?) AND status = 'completed') as total_sessions,
+      (SELECT COUNT(*) FROM sessions WHERE teacher_id = ? AND status = 'completed') as sessions_taught,
+      (SELECT COUNT(*) FROM sessions WHERE learner_id = ? AND status = 'completed') as sessions_learned,
+      (SELECT COUNT(*) FROM user_badges WHERE user_id = ?) as badges_earned
+  `, [authUser.userId, authUser.userId, authUser.userId, authUser.userId, authUser.userId])
+
+  return c.json<ApiResponse>({
+    success: true,
+    data: {
+      user,
+      upcoming_sessions,
+      recent_transactions,
+      recommended_content,
+      stats
+    }
+  })
+})
+
+// ==================== SEARCH ROUTES ====================
+
+// Global search
+app.get('/api/search', async (c) => {
+  const query_text = c.req.query('q')
+  const type = c.req.query('type') // 'users', 'skills', 'content'
+
+  if (!query_text) {
+    return c.json<ApiResponse>({ success: false, error: 'Search query required' }, 400)
+  }
+
+  const results: any = {}
+
+  if (!type || type === 'skills') {
+    results.skills = await query(c.env.DB,
+      'SELECT * FROM skills WHERE (name LIKE ? OR description LIKE ?) AND is_active = 1 LIMIT 10',
+      [`%${query_text}%`, `%${query_text}%`]
+    )
+  }
+
+  if (!type || type === 'users') {
+    results.users = await query(c.env.DB,
+      'SELECT id, name, bio, avatar_url, role FROM users WHERE (name LIKE ? OR bio LIKE ?) AND is_active = 1 LIMIT 10',
+      [`%${query_text}%`, `%${query_text}%`]
+    )
+  }
+
+  if (!type || type === 'content') {
+    results.content = await query(c.env.DB, `
+      SELECT lc.*, u.name as creator_name, s.name as skill_name
+      FROM learning_content lc
+      JOIN users u ON lc.creator_id = u.id
+      JOIN skills s ON lc.skill_id = s.id
+      WHERE (lc.title LIKE ? OR lc.description LIKE ?) AND lc.is_approved = 1
+      LIMIT 10
+    `, [`%${query_text}%`, `%${query_text}%`])
+  }
+
+  return c.json<ApiResponse>({ success: true, data: results })
+})
+
+// ==================== ADMIN ROUTES ====================
+
+// Get pending content for approval
+app.get('/api/admin/content/pending', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  // Check if admin
+  const user = await queryOne<User>(c.env.DB, 'SELECT is_admin FROM users WHERE id = ?', [authUser.userId])
+  if (!user || !user.is_admin) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const content = await query(c.env.DB, `
+    SELECT lc.*, u.name as creator_name, s.name as skill_name
+    FROM learning_content lc
+    JOIN users u ON lc.creator_id = u.id
+    JOIN skills s ON lc.skill_id = s.id
+    WHERE lc.is_approved = 0
+    ORDER BY lc.created_at DESC
+  `)
+
+  return c.json<ApiResponse>({ success: true, data: content })
+})
+
+// Approve/reject content
+app.patch('/api/admin/content/:id', async (c) => {
+  const authUser = getUserFromAuth(c.req.header('Authorization') || null)
+  if (!authUser) {
+    return c.json<ApiResponse>({ success: false, error: 'Unauthorized' }, 401)
+  }
+
+  const user = await queryOne<User>(c.env.DB, 'SELECT is_admin FROM users WHERE id = ?', [authUser.userId])
+  if (!user || !user.is_admin) {
+    return c.json<ApiResponse>({ success: false, error: 'Forbidden' }, 403)
+  }
+
+  const contentId = getIntParam(c.req.param('id'))
+  const { is_approved } = await c.req.json()
+
+  await execute(c.env.DB,
+    'UPDATE learning_content SET is_approved = ? WHERE id = ?',
+    [is_approved ? 1 : 0, contentId]
+  )
+
+  return c.json<ApiResponse>({ success: true, message: is_approved ? 'Content approved' : 'Content rejected' })
+})
+
+// ==================== HOME PAGE ====================
 
 app.get('/', (c) => {
-  return c.render(<h1>Hello!</h1>)
+  return c.html(`
+    <!DOCTYPE html>
+    <html lang="en">
+    <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>SkillSwap - Learn. Teach. Connect.</title>
+        <script src="https://cdn.tailwindcss.com"></script>
+        <link href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.4.0/css/all.min.css" rel="stylesheet">
+        <style>
+          .gradient-bg { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+          .card-hover:hover { transform: translateY(-4px); transition: all 0.3s; }
+        </style>
+    </head>
+    <body class="bg-gray-50">
+        <!-- Navigation -->
+        <nav class="bg-white shadow-lg">
+            <div class="container mx-auto px-6 py-4">
+                <div class="flex justify-between items-center">
+                    <div class="flex items-center space-x-2">
+                        <i class="fas fa-exchange-alt text-3xl text-purple-600"></i>
+                        <span class="text-2xl font-bold gradient-text">SkillSwap</span>
+                    </div>
+                    <div class="space-x-4">
+                        <button onclick="showLogin()" class="px-6 py-2 text-purple-600 hover:text-purple-800">Login</button>
+                        <button onclick="showRegister()" class="px-6 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700">Get Started</button>
+                    </div>
+                </div>
+            </div>
+        </nav>
+
+        <!-- Hero Section -->
+        <section class="gradient-bg text-white py-20">
+            <div class="container mx-auto px-6 text-center">
+                <h1 class="text-5xl font-bold mb-6">Learn Any Skill. Teach Your Passion.</h1>
+                <p class="text-xl mb-8 max-w-2xl mx-auto">Connect with a global community of learners and teachers. Exchange skills using our credit-based system. No upfront cash needed.</p>
+                <div class="space-x-4">
+                    <button onclick="showRegister()" class="px-8 py-4 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 text-lg">
+                        Start Learning <i class="fas fa-arrow-right ml-2"></i>
+                    </button>
+                    <button onclick="showRegister()" class="px-8 py-4 border-2 border-white text-white rounded-lg font-semibold hover:bg-white hover:text-purple-600 text-lg">
+                        Start Teaching <i class="fas fa-chalkboard-teacher ml-2"></i>
+                    </button>
+                </div>
+            </div>
+        </section>
+
+        <!-- Features Section -->
+        <section class="py-20">
+            <div class="container mx-auto px-6">
+                <h2 class="text-4xl font-bold text-center mb-16">Why Choose SkillSwap?</h2>
+                <div class="grid md:grid-cols-3 gap-8">
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-coins"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Credit-Based System</h3>
+                        <p class="text-gray-600">Earn credits by teaching and spend them on learning. No upfront payment required. Start with 100 free credits!</p>
+                    </div>
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-video"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Live Sessions</h3>
+                        <p class="text-gray-600">Book one-on-one sessions with expert teachers. Interactive learning with video calls, screen sharing, and collaboration tools.</p>
+                    </div>
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-book-reader"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Micro-Learning Library</h3>
+                        <p class="text-gray-600">Access bite-sized lessons created by the community. Learn at your own pace with quality content.</p>
+                    </div>
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-star"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Rating & Badges</h3>
+                        <p class="text-gray-600">Build your reputation with reviews and earn badges. Gamified learning keeps you motivated!</p>
+                    </div>
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-users"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Community</h3>
+                        <p class="text-gray-600">Join forums, participate in workshops, and connect with like-minded learners worldwide.</p>
+                    </div>
+                    <div class="bg-white p-8 rounded-lg shadow-lg card-hover">
+                        <div class="text-4xl mb-4 text-purple-600"><i class="fas fa-globe"></i></div>
+                        <h3 class="text-2xl font-bold mb-4">Global Access</h3>
+                        <p class="text-gray-600">Learn from teachers around the world. Hundreds of skills across tech, creative, lifestyle, and more.</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- Categories Section -->
+        <section class="py-20 bg-gray-100">
+            <div class="container mx-auto px-6">
+                <h2 class="text-4xl font-bold text-center mb-16">Popular Skill Categories</h2>
+                <div class="grid md:grid-cols-5 gap-6">
+                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
+                        <div class="text-5xl mb-4">💻</div>
+                        <h4 class="font-bold text-lg">Technology</h4>
+                        <p class="text-sm text-gray-600 mt-2">Programming, Web Dev, Data Science</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
+                        <div class="text-5xl mb-4">🎨</div>
+                        <h4 class="font-bold text-lg">Creative</h4>
+                        <p class="text-sm text-gray-600 mt-2">Design, Art, Photography, Music</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
+                        <div class="text-5xl mb-4">🗣️</div>
+                        <h4 class="font-bold text-lg">Languages</h4>
+                        <p class="text-sm text-gray-600 mt-2">Spanish, French, Japanese & more</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
+                        <div class="text-5xl mb-4">💼</div>
+                        <h4 class="font-bold text-lg">Business</h4>
+                        <p class="text-sm text-gray-600 mt-2">Marketing, Strategy, Leadership</p>
+                    </div>
+                    <div class="bg-white p-6 rounded-lg text-center shadow hover:shadow-xl transition cursor-pointer">
+                        <div class="text-5xl mb-4">🧘</div>
+                        <h4 class="font-bold text-lg">Lifestyle</h4>
+                        <p class="text-sm text-gray-600 mt-2">Yoga, Cooking, Fitness, Wellness</p>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- CTA Section -->
+        <section class="gradient-bg text-white py-20">
+            <div class="container mx-auto px-6 text-center">
+                <h2 class="text-4xl font-bold mb-6">Ready to Start Your Learning Journey?</h2>
+                <p class="text-xl mb-8 max-w-2xl mx-auto">Join thousands of learners and teachers already on SkillSwap. Get 100 free credits when you sign up!</p>
+                <button onclick="showRegister()" class="px-8 py-4 bg-white text-purple-600 rounded-lg font-semibold hover:bg-gray-100 text-lg">
+                    Join SkillSwap Now <i class="fas fa-rocket ml-2"></i>
+                </button>
+            </div>
+        </section>
+
+        <!-- Footer -->
+        <footer class="bg-gray-900 text-white py-12">
+            <div class="container mx-auto px-6">
+                <div class="grid md:grid-cols-4 gap-8">
+                    <div>
+                        <div class="flex items-center space-x-2 mb-4">
+                            <i class="fas fa-exchange-alt text-2xl"></i>
+                            <span class="text-xl font-bold">SkillSwap</span>
+                        </div>
+                        <p class="text-gray-400">Learn. Teach. Connect.</p>
+                    </div>
+                    <div>
+                        <h4 class="font-bold mb-4">Platform</h4>
+                        <ul class="space-y-2 text-gray-400">
+                            <li><a href="#" class="hover:text-white">Browse Skills</a></li>
+                            <li><a href="#" class="hover:text-white">Find Teachers</a></li>
+                            <li><a href="#" class="hover:text-white">Start Teaching</a></li>
+                            <li><a href="#" class="hover:text-white">Pricing</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-bold mb-4">Resources</h4>
+                        <ul class="space-y-2 text-gray-400">
+                            <li><a href="#" class="hover:text-white">Help Center</a></li>
+                            <li><a href="#" class="hover:text-white">Community</a></li>
+                            <li><a href="#" class="hover:text-white">Blog</a></li>
+                            <li><a href="#" class="hover:text-white">API Docs</a></li>
+                        </ul>
+                    </div>
+                    <div>
+                        <h4 class="font-bold mb-4">Legal</h4>
+                        <ul class="space-y-2 text-gray-400">
+                            <li><a href="#" class="hover:text-white">Privacy Policy</a></li>
+                            <li><a href="#" class="hover:text-white">Terms of Service</a></li>
+                            <li><a href="#" class="hover:text-white">Cookie Policy</a></li>
+                        </ul>
+                    </div>
+                </div>
+                <div class="border-t border-gray-800 mt-8 pt-8 text-center text-gray-400">
+                    <p>&copy; 2025 SkillSwap. Built with Hono + Cloudflare Pages. All rights reserved.</p>
+                </div>
+            </div>
+        </footer>
+
+        <!-- Auth Modal (Login/Register) -->
+        <div id="authModal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-50">
+            <div class="bg-white rounded-lg p-8 max-w-md w-full mx-4">
+                <div class="flex justify-between items-center mb-6">
+                    <h3 id="modalTitle" class="text-2xl font-bold">Login</h3>
+                    <button onclick="closeModal()" class="text-gray-500 hover:text-gray-700">
+                        <i class="fas fa-times text-xl"></i>
+                    </button>
+                </div>
+                
+                <div id="loginForm">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">Email</label>
+                        <input type="email" id="loginEmail" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="you@example.com">
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 mb-2">Password</label>
+                        <input type="password" id="loginPassword" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="••••••••">
+                    </div>
+                    <button onclick="handleLogin()" class="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 font-semibold mb-4">
+                        Login
+                    </button>
+                    <div class="text-center">
+                        <p class="text-gray-600">Don't have an account? 
+                            <button onclick="switchToRegister()" class="text-purple-600 hover:text-purple-800 font-semibold">Register</button>
+                        </p>
+                    </div>
+                </div>
+
+                <div id="registerForm" class="hidden">
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">Full Name</label>
+                        <input type="text" id="registerName" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="John Doe">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">Email</label>
+                        <input type="email" id="registerEmail" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="you@example.com">
+                    </div>
+                    <div class="mb-4">
+                        <label class="block text-gray-700 mb-2">Password</label>
+                        <input type="password" id="registerPassword" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600" placeholder="••••••••">
+                    </div>
+                    <div class="mb-6">
+                        <label class="block text-gray-700 mb-2">I want to</label>
+                        <select id="registerRole" class="w-full px-4 py-2 border rounded-lg focus:outline-none focus:border-purple-600">
+                            <option value="both">Learn and Teach</option>
+                            <option value="learner">Learn Only</option>
+                            <option value="teacher">Teach Only</option>
+                        </select>
+                    </div>
+                    <button onclick="handleRegister()" class="w-full bg-purple-600 text-white py-3 rounded-lg hover:bg-purple-700 font-semibold mb-4">
+                        Create Account
+                    </button>
+                    <div class="text-center">
+                        <p class="text-gray-600">Already have an account? 
+                            <button onclick="switchToLogin()" class="text-purple-600 hover:text-purple-800 font-semibold">Login</button>
+                        </p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script src="https://cdn.jsdelivr.net/npm/axios@1.6.0/dist/axios.min.js"></script>
+        <script>
+            const API_BASE = '/api';
+            let authToken = localStorage.getItem('authToken');
+
+            function showLogin() {
+                document.getElementById('authModal').classList.remove('hidden');
+                document.getElementById('authModal').classList.add('flex');
+                switchToLogin();
+            }
+
+            function showRegister() {
+                document.getElementById('authModal').classList.remove('hidden');
+                document.getElementById('authModal').classList.add('flex');
+                switchToRegister();
+            }
+
+            function closeModal() {
+                document.getElementById('authModal').classList.add('hidden');
+                document.getElementById('authModal').classList.remove('flex');
+            }
+
+            function switchToLogin() {
+                document.getElementById('modalTitle').textContent = 'Login';
+                document.getElementById('loginForm').classList.remove('hidden');
+                document.getElementById('registerForm').classList.add('hidden');
+            }
+
+            function switchToRegister() {
+                document.getElementById('modalTitle').textContent = 'Create Account';
+                document.getElementById('loginForm').classList.add('hidden');
+                document.getElementById('registerForm').classList.remove('hidden');
+            }
+
+            async function handleLogin() {
+                const email = document.getElementById('loginEmail').value;
+                const password = document.getElementById('loginPassword').value;
+
+                if (!email || !password) {
+                    alert('Please fill in all fields');
+                    return;
+                }
+
+                try {
+                    const response = await axios.post(API_BASE + '/auth/login', { email, password });
+                    if (response.data.success) {
+                        localStorage.setItem('authToken', response.data.data.token);
+                        localStorage.setItem('user', JSON.stringify(response.data.data.user));
+                        alert('Login successful! Redirecting to dashboard...');
+                        window.location.href = '/dashboard.html';
+                    }
+                } catch (error) {
+                    alert(error.response?.data?.error || 'Login failed');
+                }
+            }
+
+            async function handleRegister() {
+                const name = document.getElementById('registerName').value;
+                const email = document.getElementById('registerEmail').value;
+                const password = document.getElementById('registerPassword').value;
+                const role = document.getElementById('registerRole').value;
+
+                if (!name || !email || !password) {
+                    alert('Please fill in all fields');
+                    return;
+                }
+
+                try {
+                    const response = await axios.post(API_BASE + '/auth/register', { name, email, password, role });
+                    if (response.data.success) {
+                        localStorage.setItem('authToken', response.data.data.token);
+                        localStorage.setItem('user', JSON.stringify(response.data.data.user));
+                        alert('Registration successful! Welcome to SkillSwap! 🎉');
+                        window.location.href = '/dashboard.html';
+                    }
+                } catch (error) {
+                    alert(error.response?.data?.error || 'Registration failed');
+                }
+            }
+
+            // Demo login for testing
+            window.demoLogin = async function() {
+                document.getElementById('loginEmail').value = 'alice@skillswap.com';
+                document.getElementById('loginPassword').value = 'password123';
+                await handleLogin();
+            }
+        </script>
+    </body>
+    </html>
+  `)
 })
 
 export default app
