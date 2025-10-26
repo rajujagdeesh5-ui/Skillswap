@@ -10,7 +10,7 @@
     {
       "binding": "DB",
       "database_name": "skillswap-production",
-      "database_id": "will-be-created-during-deployment"
+      "database_id": "2013f5bc-496d-425f-9b31-59872039b847"
     }
   ]
 }
